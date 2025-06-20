@@ -66,15 +66,19 @@ module ModRamIO
 !============================================================================
   subroutine init_output
     ! Initialize any output that requires such action.
-
+    use ModRamGrids,  ONLY: nS
     use ModRamTiming, ONLY: TimeRamRealStart
     use ModRamSats,   ONLY: read_sat_input, init_sats
     use ModRamMain,   ONLY: PathRamOut, PathScbOut
     use ModRamParams, ONLY: DoSaveRamSats
+    use ModRamVariables, ONLY: species
 
     use ModIoUnit,    ONLY: UNITTMP_
 
     implicit none
+
+    integer :: iS
+    character(len=999) :: StringHeader
     !------------------------------------------------------------------------
     if (DoSaveRamSats) then
        call read_sat_input
@@ -85,8 +89,11 @@ module ModRamIO
     NameFileLog = trim(PathRamOut)//RamFileName('log','log',TimeRamRealStart)
     open(UNITTMP_, FILE=trim(NameFileLog), STATUS='REPLACE')
     write(UNITTMP_,*) 'RAM-SCB Log'
-    write(UNITTMP_,*) 'time year mo dy hr mn sc msc dstRam dstBiot ', &
-                      'pparh pperh pparo ppero pparhe pperhe ppare ppere'
+    StringHeader = 'time year mo dy hr mn sc msc dstRam dstBiot'
+    do iS=1,nS
+       StringHeader = trim(StringHeader)//' ppar'//species(iS)%s_code//' pper'//species(iS)%s_code
+    enddo
+    write(UNITTMP_,*) trim(StringHeader)
     close(UNITTMP_)
 
     ! Initialize Dstfile.
@@ -141,7 +148,7 @@ module ModRamIO
        ! Get current Dst.
        call get_ramdst(dst)
        open(UNITTMP_, FILE=NameFileLog, POSITION='APPEND')
-       write(UNITTMP_, '(E13.6,1x,i4,5(1x,i2.2),1x,i3.3,10(1x,E13.6))') &
+       write(UNITTMP_, '(E13.6,1x,i4,5(1x,i2.2),1x,i3.3,*(1x,E13.6))') &
             TimeIn, TimeRamNow%iYear, TimeRamNow%iMonth, &
             TimeRamNow%iDay, TimeRamNow%iHour, TimeRamNow%iMinute, &
             TimeRamNow%iSecond, floor(TimeRamNow%FracSecond*1000.0), &
@@ -1018,11 +1025,10 @@ end subroutine read_geomlt_file
     character(len=23) :: StringDate
     character(len=2)  :: ST2
     character(len=214) :: ST4, NameFileOut
-    character(len=2), dimension(4) :: speciesString = (/'_h','_o','he','_e'/)
 
     ALLOCATE(F(NR,NT,NE,NPA),FZERO(NR,NT,NE),ENO(NR),EDO(NR),AVEFL(NR,NT,NE),BARFL(NE))
     ALLOCATE(XNNO(NR),XNDO(NR))
-    ST2 = speciesString(S)
+    ST2 = species(S)%s_code
     ST4 =trim(PathRamOut)
     write(StringDate,"(i4.4,'-',i2.2,'-',i2.2,'_',i2.2,2(':',i2.2))") &
           TimeRamNow%iYear, TimeRamNow%iMonth, TimeRamNow%iDay, &
@@ -1085,7 +1091,7 @@ end subroutine read_geomlt_file
       LSWAE(S) = LSWAE(S)*RFACTOR*100/ESUM(S)
 
     ! Write the trapped equatorial flux [1/s/cm2/sr/keV]
-        IF (S.eq.1.or.S.eq.4) THEN
+        IF (species(S)%s_name.eq.'Electron') THEN
 	  if (NT.EQ.49) JW=2
 	  if (NT.EQ.25) JW=1
           IW=1
@@ -1191,16 +1197,18 @@ end subroutine read_geomlt_file
     use ModRamTiming,    ONLY: TimeRamNow, TimeRamStart, TimeRamElapsed
     use ModRamGrids,     ONLY: NR, NT, nS
     use ModRamVariables, ONLY: PParT, PPerT, PAllSum, PParSum, KP, LZ, PHI, &
-                               outsideMGNP
+                               outsideMGNP, species
     !!!! Share Modules
     use ModIOUnit, ONLY: UNITTMP_
 
     use nrtype, ONLY: pi_d
     implicit none
 
+    character(len=2)             :: st2
     character(len=23)            :: StringTime
     character(len=*), parameter  :: NameSub = 'ram_write_pressure'
     character(len=200)           :: FileName
+    character(len=999)           :: StringHeader
     integer                      :: iError, i, j, iS
     !------------------------------------------------------------------------
     ! Create Ram pressure output file.
@@ -1216,9 +1224,13 @@ end subroutine read_geomlt_file
     ! Write pressure to file.
     write(UNITTMP_,'(a, a, a3,f8.3,2x,a4,f3.1)') 'Date=', StringTime, ' T=', &
              TimeRamElapsed/3600.0 + TimeRamStart%iHour, ' Kp=', Kp
-    write(UNITTMP_,'(2a)') ' Lsh MLT PPER_H PPAR_H PPER_O PPAR_O PPER_He PPAR_He', &
-                           ' PPER_E  PPAR_E   PTotal   [keV/cm3]'
-    ! THE STRING OUTPUT should REFLECT SPECIES NAMES!!!!
+    StringHeader = ' Lsh MLT'
+    do iS=1,nS
+       st2 = species(iS)%s_code
+       StringHeader = trim(StringHeader)//' PPER'//st2//' PPAR'//st2
+    enddo
+    StringHeader = trim(StringHeader)//' PTotal [keV/cm3]'
+    write(UNITTMP_,'(2a)') trim(StringHeader)
 
     do i=2, NR
        do j=1, NT
@@ -1282,7 +1294,7 @@ subroutine write_dsbnd(S)
   use ModRamMain,      ONLY: PathRamOut
   use ModRamTiming,    ONLY: TimeRamNow, TimeRamElapsed
   use ModRamGrids,     ONLY: NE, NR, NT
-  use ModRamVariables, ONLY: EKEV, FFACTOR, FGEOS, KP, F107
+  use ModRamVariables, ONLY: EKEV, FFACTOR, FGEOS, KP, F107, species
   !!!! Share Modules
   use ModIoUnit,      ONLY: UNITTMP_
 
@@ -1290,11 +1302,9 @@ subroutine write_dsbnd(S)
   integer, intent(in) :: S
 
   integer :: K, j
-!  character(len=2), DIMENSION(4) :: ST2 = (/ '_e','_h','he','_o' /)
-  character(len=2), DIMENSION(4) :: ST2 = (/'_h','_o','he','_e'/)
   character(len=214) :: NameFluxFile
 
-  NameFluxFile=trim(PathRamOut)//RamFileName('Dsbnd/ds'//St2(S),'dat',TimeRamNow)
+  NameFluxFile=trim(PathRamOut)//RamFileName('Dsbnd/ds'//species(S)%s_code,'dat',TimeRamNow)
   OPEN(UNIT=UNITTMP_,FILE=NameFluxFile, STATUS='UNKNOWN')
   WRITE(UNITTMP_,*)'EKEV FGEOSB [1/cm2/s/ster/keV] T=',TimeRamElapsed/3600,Kp,F107
   DO K=2,NE
